@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: file_processor_redis_dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    command: redis-server --appendonly yes
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: file_processor_backend_dev
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+      - ../magic_pdf:/app/magic_pdf
+      - ../storage:/app/storage
+      - ../model_weight:/app/model_weight
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - PYTHONPATH=/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - dev_network
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      target: builder
+    container_name: file_processor_frontend_dev
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    networks:
+      - dev_network
+
+volumes:
+  redis_dev_data:
+
+networks:
+  dev_network:
+    name: file_processor_dev_network 

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+        
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        
+    - name: Create virtual environment
+      run: |
+        cd file_processing_website/backend
+        uv venv
+        
+    - name: Install dependencies
+      run: |
+        cd file_processing_website/backend
+        uv pip install -r requirements.txt
+        uv pip install -r requirements-dev.txt
+        
+    - name: Run linting
+      run: |
+        cd file_processing_website/backend
+        uv run flake8 app/
+        uv run black --check app/
+        uv run isort --check-only app/
+        
+    - name: Run tests
+      run: |
+        cd file_processing_website/backend
+        uv run pytest --cov=app --cov-report=xml
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./file_processing_website/backend/coverage.xml
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: file_processing_website/frontend/package-lock.json
+        
+    - name: Install dependencies
+      run: |
+        cd file_processing_website/frontend
+        npm ci
+        
+    - name: Run linting
+      run: |
+        cd file_processing_website/frontend
+        npm run lint
+        
+    - name: Run type checking
+      run: |
+        cd file_processing_website/frontend
+        npm run type-check
+        
+    - name: Run tests
+      run: |
+        cd file_processing_website/frontend
+        npm run test:coverage
+        
+    - name: Build
+      run: |
+        cd file_processing_website/frontend
+        npm run build
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run security audit (Python)
+      run: |
+        cd file_processing_website/backend
+        pip install safety
+        safety check -r requirements.txt
+        
+    - name: Run security audit (Node.js)
+      run: |
+        cd file_processing_website/frontend
+        npm audit --audit-level moderate 

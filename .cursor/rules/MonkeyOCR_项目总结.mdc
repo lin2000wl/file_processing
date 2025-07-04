@@ -1,0 +1,291 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# MonkeyOCR 项目总结文档
+
+## 1. 项目概述
+
+### 1.1 项目简介
+MonkeyOCR是一个基于结构-识别-关系（Structure-Recognition-Relation, SRR）三元组范式的文档解析项目。该项目采用深度学习技术对PDF文档和图像进行OCR（光学字符识别）、表格识别、公式识别和版面分析。
+
+### 1.2 技术优势
+- **性能提升**：相比MinerU平均提升5.1%性能，公式识别提升15.0%，表格识别提升8.6%
+- **模型效率**：3B参数模型在英文文档上表现最佳，超越Gemini 2.5 Pro和Qwen2.5 VL-72B
+- **处理速度**：多页文档处理速度0.84页/秒，超越MinerU(0.65)和Qwen2.5 VL-7B(0.12)
+- **多语言支持**：支持中英文文档处理
+
+### 1.3 主要功能
+- 完整的PDF和图像文档解析
+- 文本、公式、表格的单独识别
+- 文档结构检测和版面分析
+- 批量处理和分组处理
+- 多种推理后端支持
+
+## 2. 技术架构
+
+### 2.1 核心技术栈
+- **编程语言**：Python 3.9+
+- **深度学习框架**：PyTorch, Transformers 4.52.4
+- **目标检测**：YOLO (DocLayout YOLO)
+- **文档理解**：LayoutLMv3, LayoutReader
+- **PDF处理**：PyMuPDF (fitz)
+- **图像处理**：PIL/Pillow
+- **日志系统**：loguru
+- **数据验证**：pydantic
+- **Web服务**：FastAPI, Gradio
+
+### 2.2 推理后端
+- **LMDeploy**：默认推理后端，高性能推理
+- **vLLM**：高并发推理支持
+- **transformers**：原生Hugging Face推理
+- **OpenAI API**：云端API调用支持
+
+### 2.3 部署方式
+- **本地安装**：pip安装，支持CUDA加速
+- **Docker容器**：完整容器化部署
+- **API服务**：FastAPI RESTful接口
+- **Web界面**：Gradio交互式界面
+
+## 3. 项目结构
+
+### 3.1 目录架构
+```
+MonkeyOCR/
+├── api/                    # FastAPI接口服务
+├── demo/                   # Gradio演示界面
+├── docker/                 # Docker配置文件
+├── docs/                   # 项目文档
+├── magic_pdf/              # 核心代码包
+│   ├── config/            # 配置管理
+│   ├── data/              # 数据处理模块
+│   ├── dict2md/           # 内容转换模块
+│   ├── filter/            # 文档过滤器
+│   ├── libs/              # 工具库
+│   ├── model/             # 模型相关
+│   ├── operators/         # 操作符
+│   ├── post_proc/         # 后处理
+│   ├── pre_proc/          # 预处理
+│   ├── resources/         # 资源文件
+│   └── utils/             # 工具函数
+├── tools/                  # 工具脚本
+├── parse.py               # 主要解析脚本
+├── model_configs.yaml     # 模型配置
+├── requirements.txt       # 依赖列表
+└── setup.py              # 安装脚本
+```
+
+### 3.2 核心模块说明
+
+#### 3.2.1 模型模块 (magic_pdf/model/)
+- **MonkeyOCR**：核心模型类，支持多种推理后端
+- **MonkeyChat_LMDeploy**：LMDeploy后端实现
+- **MonkeyChat_vLLM**：vLLM后端实现
+- **MonkeyChat_transformers**：transformers后端实现
+- **MonkeyChat_OpenAIAPI**：OpenAI API后端实现
+- **AtomModelSingleton**：模型单例管理器
+- **DocLayoutYOLOModel**：文档版面检测模型
+- **BatchAnalyzeLLM**：批量分析处理
+
+#### 3.2.2 数据处理模块 (magic_pdf/data/)
+- **Dataset**：数据集抽象基类
+- **PymuDocDataset**：PDF文档数据集
+- **ImageDataset**：图像数据集
+- **MultiFileDataset**：多文件数据集
+- **IOReader/IOWriter**：数据读写接口
+
+#### 3.2.3 预处理模块 (magic_pdf/pre_proc/)
+- **ocr_construct_page_component_v2**：页面组件构建
+- **ocr_cut_image_and_table**：图像和表格切割
+- **remove_overlap_between_bbox**：边界框重叠处理
+- **ocr_prepare_bboxes_for_layout_split_v2**：版面分割准备
+
+#### 3.2.4 后处理模块 (magic_pdf/post_proc/)
+- **para_split**：段落分割处理
+- **ListLineTag**：列表行标记
+
+#### 3.2.5 内容转换模块 (magic_pdf/dict2md/)
+- **ocr_mk_markdown_with_para_core_v2**：Markdown转换核心
+- **detect_language**：语言检测
+- **merge_para_with_text**：段落文本合并
+
+## 4. API接口
+
+### 4.1 FastAPI服务
+主要端点包括：
+- **GET /health**：健康检查
+- **POST /extract/text**：文本提取
+- **POST /extract/formula**：公式提取
+- **POST /extract/table**：表格提取
+- **POST /parse**：完整文档解析
+- **POST /parse/split**：分页解析
+
+### 4.2 响应格式
+```python
+class TaskResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
+
+class ParseResponse(BaseModel):
+    markdown: str
+    layout_pdf: str  # base64编码
+    middle_json: dict
+```
+
+## 5. 配置管理
+
+### 5.1 模型配置 (model_configs.yaml)
+```yaml
+device: cuda                    # 设备类型：cuda/cpu/mps
+weights:
+  doclayout_yolo: Structure/doclayout_yolo_docstructbench_imgsz1280_2501.pt
+  layoutreader: Relation
+models_dir: model_weight
+layout_config:
+  model: doclayout_yolo        # 版面检测模型
+  reader:
+    name: layoutreader         # 阅读顺序模型
+chat_config:
+  weight_path: model_weight/Recognition
+  backend: lmdeploy           # 推理后端
+  batch_size: 10
+```
+
+### 5.2 支持的模型
+- **版面检测**：doclayout_yolo, PP-DocLayout_plus-L
+- **阅读顺序**：layoutreader
+- **文档理解**：MonkeyOCR系列模型
+
+## 6. 使用方式
+
+### 6.1 命令行使用
+```bash
+# 基本解析
+python parse.py input_path
+
+# 批量处理
+python parse.py input_path -g 20
+
+# 单任务识别
+python parse.py input_path -t text/formula/table
+
+# 分页处理
+python parse.py input_path -s
+
+# 自定义配置
+python parse.py input_path -o ./output -c config.yaml
+```
+
+### 6.2 API调用
+```bash
+# 启动API服务
+uvicorn api.main:app --port 8000
+
+# 文档解析请求
+curl -X POST "http://localhost:8000/parse" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@document.pdf"
+```
+
+### 6.3 Gradio界面
+```bash
+python demo/demo_gradio.py
+```
+
+## 7. 输出结果
+
+### 7.1 输出文件类型
+1. **Markdown文件** (`your.md`)：最终解析的文档内容
+2. **版面结果** (`your_layout.pdf`)：标注版面的PDF文件
+3. **中间结果** (`your_middle.json`)：详细的块信息JSON文件
+
+### 7.2 支持的内容类型
+- 文本块：段落、标题、列表
+- 表格：HTML和LaTeX格式
+- 公式：LaTeX格式
+- 图像：Base64编码
+- 结构化内容：目录、页眉页脚
+
+## 8. 开发指南
+
+### 8.1 设计模式
+- **单例模式**：AtomModelSingleton用于模型管理
+- **工厂模式**：不同推理后端的创建
+- **策略模式**：多种推理后端的实现
+- **数据集抽象**：Dataset基类和具体实现
+
+### 8.2 代码规范
+- **命名约定**：类名PascalCase，函数名snake_case
+- **类型提示**：使用typing模块进行类型标注
+- **文档字符串**：详细的函数参数和返回值说明
+- **日志记录**：使用loguru进行统一日志管理
+
+### 8.3 扩展指南
+- **添加新模型**：在magic_pdf/model/下添加新模型类
+- **添加新后端**：实现新的推理后端类
+- **添加新数据源**：继承Dataset基类
+- **添加新处理器**：在相应的proc目录下添加
+
+## 9. 性能优化
+
+### 9.1 推理优化
+- 批处理提高推理效率
+- GPU加速支持
+- 内存管理和清理
+- 模型权重懒加载
+
+### 9.2 并发处理
+- 异步API处理
+- 多线程文件处理
+- 批量分组处理
+- 内存池管理
+
+## 10. 错误处理
+
+### 10.1 自定义异常
+- **FileNotExisted**：文件不存在
+- **InvalidConfig**：配置无效
+- **InvalidParams**：参数无效
+- **EmptyData**：数据为空
+- **CUDA_NOT_AVAILABLE**：CUDA不可用
+
+### 10.2 错误处理策略
+- 完善的错误日志记录
+- 优雅的错误降级处理
+- 用户友好的错误信息
+- 自动重试机制
+
+## 11. 部署建议
+
+### 11.1 硬件要求
+- **GPU**：建议使用NVIDIA GPU，支持CUDA
+- **内存**：建议16GB以上
+- **存储**：模型权重约需要10GB空间
+
+### 11.2 生产部署
+- 使用Docker容器化部署
+- 配置负载均衡
+- 监控和日志收集
+- 定期模型更新
+
+## 12. 后续开发方向
+
+### 12.1 功能扩展
+- 支持拍照文档处理
+- 多语言支持扩展
+- 更多输出格式支持
+- 实时处理能力
+
+### 12.2 性能提升
+- 模型量化和加速
+- 分布式处理支持
+- 缓存机制优化
+- 流式处理支持
+
+---
+
+**文档版本**：v1.0  
+**最后更新**：2025年1月  
+**维护者**：开发团队

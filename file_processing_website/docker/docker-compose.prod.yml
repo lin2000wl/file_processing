@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: file_processor_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    networks:
+      - prod_network
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: file_processor_backend
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../storage:/app/storage
+      - ../model_weight:/app/model_weight
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=production
+      - PYTHONPATH=/app
+    networks:
+      - prod_network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: file_processor_worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - backend
+    volumes:
+      - ../storage:/app/storage
+      - ../model_weight:/app/model_weight
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=production
+      - PYTHONPATH=/app
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    networks:
+      - prod_network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: file_processor_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl
+    networks:
+      - prod_network
+
+  flower:
+    image: mher/flower:0.9.7
+    container_name: file_processor_flower
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+    networks:
+      - prod_network
+
+volumes:
+  redis_data:
+
+networks:
+  prod_network:
+    name: file_processor_network 

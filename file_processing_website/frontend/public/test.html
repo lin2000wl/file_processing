@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API连接测试</title>
+</head>
+<body>
+    <h1>API连接测试</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        // 测试后端健康检查
+        fetch('/api/v1/tasks/')
+            .then(response => response.json())
+            .then(data => {
+                results.innerHTML += '<p>✅ 任务API连接成功: ' + JSON.stringify(data) + '</p>';
+            })
+            .catch(error => {
+                results.innerHTML += '<p>❌ 任务API连接失败: ' + error.message + '</p>';
+                console.error('API Error:', error);
+            });
+            
+        // 测试健康检查
+        fetch('http://localhost:8000/health')
+            .then(response => response.json())
+            .then(data => {
+                results.innerHTML += '<p>✅ 健康检查成功: ' + JSON.stringify(data) + '</p>';
+            })
+            .catch(error => {
+                results.innerHTML += '<p>❌ 健康检查失败: ' + error.message + '</p>';
+                console.error('Health Check Error:', error);
+            });
+    </script>
+</body>
+</html> 
