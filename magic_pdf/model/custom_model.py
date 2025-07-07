@@ -1,4 +1,9 @@
 import os
+# 根据配置决定是否启用FlashAttention
+# 如果配置中启用了FlashAttention，则尝试使用，否则禁用
+# os.environ["LMDEPLOY_USE_FLASH_ATTN"] = "0"  # 注释掉强制禁用
+os.environ["TRITON_DISABLE_LINE_INFO"] = "1"
+
 import torch
 from magic_pdf.config.constants import *
 from magic_pdf.model.sub_modules.model_init import AtomModelSingleton
@@ -49,6 +54,19 @@ class MonkeyOCR:
         self.layout_model_name = self.layout_config.get(
             'model', MODEL_NAME.DocLayout_YOLO
         )
+        
+        # 检查是否启用FlashAttention
+        chat_config = self.configs.get('chat_config', {})
+        use_flash_attention = chat_config.get('use_flash_attention', False)
+        
+        if use_flash_attention:
+            # 尝试启用FlashAttention
+            os.environ["LMDEPLOY_USE_FLASH_ATTN"] = "1"
+            logger.info("✅ FlashAttention已启用")
+        else:
+            # 禁用FlashAttention
+            os.environ["LMDEPLOY_USE_FLASH_ATTN"] = "0"
+            logger.info("❌ FlashAttention已禁用")
 
         atom_model_manager = AtomModelSingleton()
         if self.layout_model_name == MODEL_NAME.DocLayout_YOLO:
@@ -142,7 +160,18 @@ class MonkeyChat_LMDeploy:
 
     def _auto_config_dtype(self, engine_config=None, PytorchEngineConfig=None):
         if engine_config is None:
-            engine_config = PytorchEngineConfig(session_len=10240)
+            # 配置GPU显存限制为21GB
+            engine_config = PytorchEngineConfig(
+                session_len=8192,  # 保持较长的session
+                max_batch_size=2,  # 适度增加批处理大小
+                cache_max_entry_count=0.8,  # 增加缓存使用率
+                enable_prefix_caching=True,  # 启用前缀缓存提高效率
+                num_cpu_blocks=0,  # 不使用CPU块
+                num_gpu_blocks=0,  # 让系统自动分配GPU块
+                thread_safe=False,  # 禁用线程安全以减少开销
+                eager_mode=False,  # 尝试使用编译模式提高性能
+                max_memory={0: "21GB"}  # 限制GPU 0的最大显存使用为21GB（使用整数作为key）
+            )
         dtype = "bfloat16"
         if torch.cuda.is_available():
             device = torch.cuda.current_device()
@@ -176,9 +205,16 @@ class MonkeyChat_vLLM:
         self.gen_config = SamplingParams(max_tokens=4096,temperature=0,repetition_penalty=1.05)
     
     def _auto_gpu_mem_ratio(self, ratio):
+        # 限制最大显存使用为21GB
         mem_free, mem_total = torch.cuda.mem_get_info()
-        ratio = ratio * mem_free / mem_total
-        return ratio
+        max_memory_bytes = 21 * 1024 * 1024 * 1024  # 21GB in bytes
+        
+        # 取较小值：要么是原比例计算的内存，要么是21GB
+        target_memory = min(ratio * mem_free, max_memory_bytes)
+        final_ratio = target_memory / mem_total
+        
+        logger.info(f"GPU显存限制: {max_memory_bytes / (1024**3):.1f}GB, 实际使用比例: {final_ratio:.2f}")
+        return final_ratio
 
     def batch_inference(self, images, questions):
         placeholder = "<|image_pad|>"
@@ -224,12 +260,54 @@ class MonkeyChat_transformers:
         logger.info(f"Using device: {self.device}")
         logger.info(f"Max batch size: {self.max_batch_size}")
         
+        # 智能选择attention实现 - 针对不同GPU架构优化
+        attn_implementation = "sdpa"  # 默认使用SDPA，性能较好且兼容性强
+        
+        # 检查GPU架构，智能选择最佳attention实现
+        if torch.cuda.is_available():
+            capability = torch.cuda.get_device_capability(0)
+            sm_version = capability[0] * 10 + capability[1]
+            logger.info(f"检测到GPU架构: SM {capability[0]}.{capability[1]} (SM{sm_version})")
+            
+            if sm_version < 80:  # Ampere架构是SM 8.0+
+                logger.warning(f"⚠️ 检测到{capability}架构GPU，不支持FlashAttention")
+                logger.info("🔧 使用SDPA attention实现（性能优于eager）")
+                attn_implementation = "sdpa"
+                # 强制设置环境变量
+                os.environ["LMDEPLOY_USE_FLASH_ATTN"] = "0"
+                os.environ["DISABLE_FLASH_ATTN"] = "1"
+            else:
+                # 只有Ampere或更新架构才检查是否启用FlashAttention
+                if os.environ.get("LMDEPLOY_USE_FLASH_ATTN", "0") == "1":
+                    try:
+                        import flash_attn
+                        if hasattr(flash_attn, '__version__') and flash_attn.__version__.startswith('2'):
+                            attn_implementation = "flash_attention_2"
+                            logger.info(f"✅ 使用FlashAttention2，版本: {flash_attn.__version__}")
+                        else:
+                            attn_implementation = "sdpa"
+                            logger.warning("❌ FlashAttention版本不兼容，降级到SDPA")
+                    except ImportError:
+                        logger.warning("❌ FlashAttention未安装，降级到SDPA")
+                        attn_implementation = "sdpa"
+                else:
+                    logger.info("🔧 使用SDPA注意力机制（高性能且兼容）")
+                    attn_implementation = "sdpa"
+        
+        # 设置显存限制 - 修复设备ID格式
+        max_memory = {0: "21GB"} if torch.cuda.is_available() else None
+        if max_memory:
+            logger.info(f"设置GPU显存限制: {max_memory}")
+        
         try:
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                         model_path,
                         torch_dtype=torch.bfloat16 if bf16_supported else torch.float16,
-                        attn_implementation="flash_attention_2" if self.device.startswith("cuda") else 'sdpa',
-                        device_map=self.device,
+                        attn_implementation=attn_implementation,  # 强制使用eager
+                        device_map="auto",  # 使用auto进行设备映射
+                        max_memory=max_memory,  # 设置显存限制（使用整数作为设备ID）
+                        low_cpu_mem_usage=True,  # 降低CPU内存使用
+                        trust_remote_code=True,  # 添加信任远程代码
                     )
                 
             self.processor = AutoProcessor.from_pretrained(
@@ -240,6 +318,9 @@ class MonkeyChat_transformers:
             
             self.model.eval()
             logger.info("Qwen2.5VL model loaded successfully")
+            logger.info(f"Attention implementation: {attn_implementation}")
+            if max_memory:
+                logger.info(f"GPU memory limit: {max_memory}")
             
         except Exception as e:
             logger.error(f"Failed to load model: {e}")

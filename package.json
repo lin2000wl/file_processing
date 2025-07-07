@@ -1,0 +1,28 @@
+{
+  "name": "file-processing-website",
+  "version": "1.0.0",
+  "description": "基于MonkeyOCR的智能文档解析平台",
+  "scripts": {
+    "dev": "cd file_processing_website/frontend && npm run dev",
+    "build": "cd file_processing_website/frontend && npm run build",
+    "preview": "cd file_processing_website/frontend && npm run preview",
+    "backend": "cd file_processing_website/backend && bash -c 'source venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload'",
+    "start-all": "cd file_processing_website && ./start_all.sh",
+    "install-frontend": "cd file_processing_website/frontend && npm install",
+    "install-backend": "cd file_processing_website/backend && pip install -r requirements.txt",
+    "test": "echo 'Running tests...' && cd file_processing_website/backend && python -m pytest tests/ && cd ../frontend && npm run test",
+    "lint": "cd file_processing_website/frontend && npm run lint",
+    "type-check": "cd file_processing_website/frontend && npm run type-check"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "keywords": ["ocr", "document-processing", "ai", "pdf", "image"],
+  "author": "AI开发助手",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+} 

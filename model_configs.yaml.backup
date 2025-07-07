@@ -1,0 +1,34 @@
+device: cuda # cuda / cpu / mps (using `transformers` as backend)
+weights:
+  doclayout_yolo: Recognition/Structure/doclayout_yolo_docstructbench_imgsz1280_2501.pt # or Recognition/Structure/layout_zh.pt
+  layoutreader: Recognition/Relation
+models_dir: model_weight
+layout_config: 
+  model: doclayout_yolo # PP-DocLayout_plus-L / doclayout_yolo
+  reader:
+    name: layoutreader
+chat_config:
+  weight_path: model_weight/Recognition/Recognition
+  backend: transformers # 使用transformers后端
+  batch_size: 4 # 增加批处理大小以提高性能
+  use_flash_attention: false # RTX 2080 Ti不支持FlashAttention2，使用优化的SDPA
+  max_new_tokens: 4096
+  temperature: 0.1
+  top_p: 0.9
+
+# 性能优化配置
+performance_config:
+  mixed_precision: true # 使用混合精度
+  compile_model: false # 暂时禁用模型编译
+
+# GPU内存优化
+memory_config:
+  max_memory_per_gpu: "21GB" # 限制每个GPU最大使用21GB显存
+  pin_memory: true # 使用固定内存
+  low_cpu_mem_usage: false # 降低CPU内存使用
+
+# Uncomment the following lines if use `api` as backend 
+# api_config:
+#   url: https://api.openai.com/v1
+#   model_name: gpt-4.1
+#   api_key: sk-xxx

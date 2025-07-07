@@ -54,11 +54,6 @@ elif [ "$1" = "fastapi" ]; then
     mkdir -p /app/tmp
     cd /app/MonkeyOCR
     exec uvicorn api.main:app --host ${FASTAPI_HOST:-0.0.0.0} --port ${FASTAPI_PORT:-7861}
-elif [ "$1" = "fastapi-batch" ]; then
-    log_info "Starting FastAPI Batch Processing server"
-    mkdir -p /app/tmp /app/batch_input /app/batch_output
-    cd /app/MonkeyOCR
-    exec uvicorn api.batch_main:app --host ${FASTAPI_HOST:-0.0.0.0} --port ${FASTAPI_PORT:-8000}
 else
     log_info "Executing custom command: $*"
     exec "$@"
