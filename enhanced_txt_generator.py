@@ -160,11 +160,18 @@ class EnhancedTxtGenerator:
     
     def _process_table_block(self, block: Dict) -> str:
         """处理表格块"""
+        # 首先检查block级别的html字段
         html_content = block.get('html', '')
         if html_content:
-            # 简单的HTML表格转文本
             table_text = self._html_table_to_text(html_content)
             return f"[表格]\n{table_text}"
+        
+        # 如果block级别没有html，则深入搜索spans中的html
+        html_content = self._extract_html_from_spans(block)
+        if html_content:
+            table_text = self._html_table_to_text(html_content)
+            return f"[表格]\n{table_text}"
+        
         return self._extract_text_from_block(block)
     
     def _process_image_block(self, block: Dict) -> str:
@@ -252,15 +259,33 @@ class EnhancedTxtGenerator:
         
         return line_text.strip()
     
+    def _extract_html_from_spans(self, block: Dict) -> str:
+        """从spans中提取HTML内容"""
+        def search_html_in_obj(obj):
+            if isinstance(obj, dict):
+                # 如果直接有html字段，返回它
+                if 'html' in obj and isinstance(obj['html'], str):
+                    return obj['html']
+                # 递归搜索所有字段
+                for value in obj.values():
+                    result = search_html_in_obj(value)
+                    if result:
+                        return result
+            elif isinstance(obj, list):
+                # 递归搜索列表中的每个元素
+                for item in obj:
+                    result = search_html_in_obj(item)
+                    if result:
+                        return result
+            return None
+        
+        return search_html_in_obj(block) or ""
+    
     def _html_table_to_text(self, html_content: str) -> str:
-        """将HTML表格转换为文本格式"""
-        # 简单的HTML表格解析
+        """将HTML表格转换为文本格式，保留所有HTML标签字符"""
+        # 直接返回原始HTML内容，保留所有<tr><td>等标签字符
         try:
-            # 移除HTML标签，保留内容
-            text_content = re.sub(r'<[^>]+>', ' ', html_content)
-            # 清理多余空格
-            text_content = re.sub(r'\s+', ' ', text_content)
-            return text_content.strip()
+            return html_content
         except Exception:
             return "[表格内容]"
     
